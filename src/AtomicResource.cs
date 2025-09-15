@@ -6,10 +6,7 @@ using Soenneker.Utils.AtomicResources.Abstract;
 
 namespace Soenneker.Utils.AtomicResources;
 
-/// <summary>
-/// Thread-safe holder for a single resource that can be lazily created,
-/// atomically reset (swap), and asynchronously torn down.
-/// </summary>
+///<inheritdoc cref="IAtomicResource{T}"/>
 public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
 {
     private readonly Func<T> _factory;
@@ -31,7 +28,6 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
             return null;
 
         T? existing = Volatile.Read(ref _value);
-
         if (existing is not null)
             return existing;
 
@@ -44,7 +40,7 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
             if (_disposed)
             {
                 Interlocked.Exchange(ref _value, null);
-                _ = _teardown(created); // best-effort cleanup (cannot await here)
+                _ = _teardown(created); // best-effort cleanup (cannot block or await here)
                 return null;
             }
 
@@ -56,7 +52,6 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
         return raced;
     }
 
-
     public T? TryGet() => Volatile.Read(ref _value);
 
     public async ValueTask Reset()
@@ -67,7 +62,7 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
         T fresh = _factory();
         T? old = Interlocked.Exchange(ref _value, fresh);
 
-        if (old is null) 
+        if (old is null)
             return;
 
         try
@@ -80,7 +75,10 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
         }
     }
 
-
+    /// <summary>
+    /// Asynchronously disposes the current resource (if any) using the async teardown.
+    /// Safe to call multiple times.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
@@ -92,6 +90,30 @@ public sealed class AtomicResource<T> : IAtomicResource<T> where T : class
         try
         {
             await _teardown(old).NoSync();
+        }
+        catch
+        {
+            /* ignore */
+        }
+    }
+
+    /// <summary>
+    /// Synchronously disposes the current resource (if any) by blocking on the teardown ValueTask.
+    /// Use when you need deterministic synchronous cleanup (e.g., using-statement).
+    /// </summary>
+    public void Dispose()
+    {
+        _disposed = true;
+        T? old = Interlocked.Exchange(ref _value, null);
+
+        if (old is null)
+            return;
+
+        try
+        {
+            // Block synchronously without allocating a Task if possible.
+            ValueTask vt = _teardown(old);
+            vt.GetAwaiter().GetResult();
         }
         catch
         {

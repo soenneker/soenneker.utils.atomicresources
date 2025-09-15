@@ -8,7 +8,7 @@ namespace Soenneker.Utils.AtomicResources.Abstract;
 /// atomically reset (swap), and asynchronously torn down.
 /// </summary>
 /// <typeparam name="T">The resource type being managed.</typeparam>
-public interface IAtomicResource<out T> : IAsyncDisposable where T : class
+public interface IAtomicResource<out T> : IAsyncDisposable, IDisposable where T : class
 {
     /// <summary>
     /// Gets the current instance, creating it if necessary.
